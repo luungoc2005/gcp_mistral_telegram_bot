@@ -1,0 +1,5 @@
+python-telegram-bot
+llama-cpp-python
+functions-framework
+google-cloud-pubsub
+Flask
