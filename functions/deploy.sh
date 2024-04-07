@@ -21,6 +21,7 @@ gcloud functions deploy handle_message \
   --region $REGION \
   --cpu 4 \
   --memory 16Gi \
+  --timeout 3600s \
   --gen2
 
 curl -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/setWebhook?url=https://$REGION-$GOOGLE_CLOUD_PROJECT_ID.cloudfunctions.net/telegram_webhook"

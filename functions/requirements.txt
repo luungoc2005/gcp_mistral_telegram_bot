@@ -2,5 +2,8 @@ python-telegram-bot
 llama-cpp-python
 functions-framework
 google-cloud-pubsub
-google-cloud-datastore
+google-cloud-firestore
+google-cloud-storage
+google-cloud-logging
 Flask
+PyYAML
