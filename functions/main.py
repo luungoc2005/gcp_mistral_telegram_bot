@@ -9,16 +9,18 @@ import logging
 import multiprocessing
 from typing import List
 from collections import namedtuple
+from datetime import datetime
 
 import llama_cpp
 import telegram
 
 import functions_framework
 import google.cloud.logging
-from google.cloud import pubsub_v1, datastore, storage
+from google.cloud import pubsub_v1, storage
 
 from prompt import get_prompt_messages
 from chatformat import format_chat_prompt, ChatMessage
+from history import append_history, get_history
 
 # Environment variables
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
@@ -33,7 +35,6 @@ topic_name = 'projects/{project_id}/topics/{topic}'.format(
 )
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 publisher = pubsub_v1.PublisherClient()
-datastore_client = datastore.Client()
 storage_client = storage.Client()
 logging_client = google.cloud.logging.Client()
 bucket = storage_client.get_bucket(GOOGLE_CLOUD_STORAGE_BUCKET)
@@ -76,16 +77,18 @@ def load_model():
                                   n_threads=multiprocessing.cpu_count()), 
             name=MODEL
         )
+        llama_model.model.set_seed(int(datetime.now().timestamp()))
         logging.info(f"Model {MODEL} loaded")
     return llama_model
 
-async def start_handler(messages, update) -> List[str]:
-    return [messages[-1].content]
+async def user_start_handler(messages, update: telegram.Update) -> List[str]:
+    return messages[-1].content.split('\n')
 
-async def default_handler(messages, update) -> List[str]:
+async def user_default_handler(messages, update: telegram.Update) -> List[str]:
     user_message = update.message.text
     messages.append(ChatMessage(role='user', content=user_message))
     prompt, prompt_stop = format_chat_prompt('chatml', messages)
+    logging.debug(f"Full prompt: {prompt}")
     stop_words = ["<|im_end|>"]
     if prompt_stop is not None:
         stop_words.append(prompt_stop)
@@ -99,31 +102,50 @@ async def default_handler(messages, update) -> List[str]:
         top_k=40,
         stop=stop_words
     )["choices"][0]["text"]
-    return [resp]
+    append_history(update, resp)
+    system_replies = resp.split('\n')
+    return system_replies
 
-handlers = {
-    "/start": start_handler,
-    "": default_handler,
+user_handlers = {
+    "/start": user_start_handler,
+    "": user_default_handler,
+}
+
+async def bot_think_handler(message: str, update: telegram.Update) -> List[str]:
+    return f"<i>{message}</i>"
+
+async def bot_say_handler(message: str, update: telegram.Update) -> List[str]:
+    return message
+
+bot_handlers = {
+    "/think": bot_think_handler,
+    "/say": bot_say_handler,
 }
 
 async def async_handle_message(cloud_event: functions_framework.CloudEvent):
-    llama_model = load_model()
+    load_model()
     event_data_str = base64.b64decode(cloud_event.data["message"]["data"]).decode("utf-8")
     update = telegram.Update.de_json(json.loads(event_data_str), bot)
     chat_id = update.message.chat.id
     # Reply with the same message
     user_message = update.message.text
     user_name = update.message.chat.first_name
-    messages = get_prompt_messages(user_name)
+    prompt_messages = get_prompt_messages(user_name)
+    messages = get_history(prompt_messages, update)
 
-    for k, v in handlers.items():
+    for k, v in user_handlers.items():
         if user_message.startswith(k):
             system_replies = await v(messages, update)
             break
-    
+
     for system_reply in system_replies:
+        for k, v in bot_handlers.items():
+            if system_reply.startswith(k):
+                param = system_reply[len(k):].strip()
+                system_reply = await v(param, update)
+                break
         logging.info(f"Generated reply: {system_reply}")
-        resp = await bot.sendMessage(chat_id=chat_id, text=system_reply)
+        resp = await bot.sendMessage(chat_id=chat_id, text=system_reply, parse_mode=telegram.constants.ParseMode.HTML)
         logging.info(f"Sent message to chat_id: {chat_id}, message: {update.message.text}, resp: {resp}")
 
     return "ok"
