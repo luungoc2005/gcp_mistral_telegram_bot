@@ -25,7 +25,11 @@ def append_history(update: telegram.Update, system_reply: str, **kwargs):
         **kwargs,
     })
 
+USER_START_COMMAND = "/start"
 def get_history(prompt_history: List[ChatMessage], update: telegram.Update) -> List[ChatMessage]:
+    if update.message.text == USER_START_COMMAND:
+        return prompt_history.copy()
+    
     collection = firestore_client.collection(str(update.message.chat_id))
     docs = collection.stream()
     messages = []
@@ -33,7 +37,7 @@ def get_history(prompt_history: List[ChatMessage], update: telegram.Update) -> L
     for doc in docs:
         data = doc.to_dict()
         # if the user sends /start, clear the chat history for the turn
-        if prev_doc is not None and not prev_doc["is_bot"] and prev_doc["message"] == "/start":
+        if prev_doc is not None and not prev_doc["is_bot"] and prev_doc["message"] == USER_START_COMMAND:
             messages = []
         else:
             role = "assistant" if data["is_bot"] else "user"

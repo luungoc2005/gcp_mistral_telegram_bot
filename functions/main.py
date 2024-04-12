@@ -81,14 +81,15 @@ def load_model():
         logging.info(f"Model {MODEL} loaded")
     return llama_model
 
-async def user_start_handler(messages, update: telegram.Update) -> List[str]:
-    return messages[-1].content.split('\n')
+async def user_start_handler(messages, update: telegram.Update) -> str:
+    resp = messages[-1].content
+    return resp
 
-async def user_default_handler(messages, update: telegram.Update) -> List[str]:
+async def user_default_handler(messages, update: telegram.Update) -> str:
     user_message = update.message.text
     messages.append(ChatMessage(role='user', content=user_message))
     prompt, prompt_stop = format_chat_prompt('chatml', messages)
-    logging.debug(f"Full prompt: {prompt}")
+    logging.info(f"Full prompt: {prompt}")
     stop_words = ["<|im_end|>"]
     if prompt_stop is not None:
         stop_words.append(prompt_stop)
@@ -102,9 +103,7 @@ async def user_default_handler(messages, update: telegram.Update) -> List[str]:
         top_k=40,
         stop=stop_words
     )["choices"][0]["text"]
-    append_history(update, resp)
-    system_replies = resp.split('\n')
-    return system_replies
+    return resp
 
 user_handlers = {
     "/start": user_start_handler,
@@ -135,7 +134,9 @@ async def async_handle_message(cloud_event: functions_framework.CloudEvent):
 
     for k, v in user_handlers.items():
         if user_message.startswith(k):
-            system_replies = await v(messages, update)
+            resp = await v(messages, update)
+            append_history(update, resp)
+            system_replies = resp.split("\n")
             break
 
     for system_reply in system_replies:
